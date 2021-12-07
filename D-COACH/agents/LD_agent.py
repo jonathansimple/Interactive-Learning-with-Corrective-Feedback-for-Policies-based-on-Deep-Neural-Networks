@@ -1,7 +1,9 @@
 import tensorflow as tf
 import numpy as np
 from agents.agent_base import AgentBase
-from models import fully_connected_layers
+from models import fully_connected_layers, fully_connected_layers_fnn
+import tf_slim as slim
+
 
 
 class Agent(AgentBase):
@@ -29,6 +31,24 @@ class Agent(AgentBase):
         variables = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.TRAINABLE_VARIABLES, 'base')
         self.train_step = tf.compat.v1.train.GradientDescentOptimizer(
             learning_rate=params['learning_rate']).minimize(loss, var_list=variables)
+
+        #####################################
+        with tf.compat.v1.variable_scope('feedback'):
+
+
+            x = tf.compat.v1.placeholder(tf.float32, [None, params['low_dim_input_shape']],
+                                                name='input_fnn')
+
+
+            # Build fully connected layers
+            self.fnn, loss_fnn = fully_connected_layers_fnn(slim.flatten(x), dim_a,
+                                                  params['fc_layers_neurons'],
+                                                  params['loss_function_type'])
+
+        variables_fnn = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.TRAINABLE_VARIABLES, 'feedback')
+        self.train_step_fnn = tf.compat.v1.train.GradientDescentOptimizer(
+            learning_rate=params['learning_rate']).minimize(loss_fnn, var_list=variables_fnn)
+        ####################################
 
         # Initialize tensorflow
         init = tf.compat.v1.global_variables_initializer()
