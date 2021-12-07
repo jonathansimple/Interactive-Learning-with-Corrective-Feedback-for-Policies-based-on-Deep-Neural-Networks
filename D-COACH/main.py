@@ -116,6 +116,7 @@ if save_results:
 # Initialize variables
 total_reward, total_feedback, total_time_steps = [], [], []
 r, total_r, t_counter, h_counter, last_t_counter = 0, 0, 0, 0, 0
+sum_action, sum_action_abs, sum_KE_x, sum_KE_y = np.zeros(3), np.zeros(3), 0, 0
 
 # Print general general information
 print('\nExperiment number:', exp_num)
@@ -135,6 +136,7 @@ for i_episode in range(max_num_of_episodes):
     print('Starting episode number', i_episode)
     agent.new_episode()
     observation = env.reset()
+    ep_action, ep_action_abs, ep_KE_x, ep_KE_y = np.zeros(3), np.zeros(3), 0, 0
 
     # Iterate over the episode
     for t in range(int(max_time_steps_episode)):
@@ -148,8 +150,16 @@ for i_episode in range(max_num_of_episodes):
         # Act
         observation, reward, done, info = env.step(action)
 
-        # print("main.py info", info)
+        # print("main.py vel", info['vel'])
+        # print("main.py action", info['action'])
         # print("observation", observation)
+
+        # Sean: per-episode energy metrics
+        ep_action += info['action']
+        ep_action_abs += np.abs(info['action'])
+        # Scaled mass to 0.01 to keep numbers small
+        ep_KE_x += 0.5 * info['vel'].x ** 2 * 0.01
+        ep_KE_y += 0.5 * info['vel'].y ** 2 * 0.01
 
         # Accumulate reward
         r += reward
@@ -162,30 +172,29 @@ for i_episode in range(max_num_of_episodes):
             # print("Received feedback:", h_counter, "; Total timesteps:", t_counter)
 
         # Update weights
-        if train:
-            if np.any(h):  # if any element is not 0
-                agent.update(h, observation)
-                if not use_simulated_teacher:
-                    print("feedback", h)
-                h_counter += 1
-                # Add state action-label pair to memory buffer
-                if use_memory_buffer:
-                    buffer.add(agent.last_step())
+        if i_episode < 10:
+          if train:
+              if np.any(h):  # if any element is not 0
+                  agent.update(h, observation)
+                  # if not use_simulated_teacher:
+                      # print("feedback", h)
+                  h_counter += 1
+                  # Add state action-label pair to memory buffer
+                  if use_memory_buffer:
+                      buffer.add(agent.last_step())
 
-                    # Train sampling from buffer
-                    if buffer.initialized():
-                        batch = buffer.sample(batch_size=config_buffer.getint('sampling_size'))
-                        agent.batch_update(batch)
-            else:
-                #Brando added this.
-                agent.update_no_fb(observation)
+                      # Train sampling from buffer
+                      if buffer.initialized():
+                          batch = buffer.sample(batch_size=config_buffer.getint('sampling_size'))
+                          agent.batch_update(batch)
+              else:
+                  #Brando added this.
+                  agent.update_no_fb(observation)
 
-
-
-            # Train every k time steps
-            if buffer.initialized() and t % history_training_rate == 0:
-                batch = buffer.sample(batch_size=config_buffer.getint('sampling_size'))
-                agent.batch_update(batch)
+              # Train every k time steps
+              if buffer.initialized() and t % history_training_rate == 0:
+                  batch = buffer.sample(batch_size=config_buffer.getint('sampling_size'))
+                  agent.batch_update(batch)
 
         t_counter += 1
 
@@ -206,6 +215,28 @@ for i_episode in range(max_num_of_episodes):
                 print('Episode Reward:', '%.3f' % r)
                 print('\n', i_episode, 'avg reward:', '%.3f' % (total_r / (i_episode + 1)), '\n')
                 print('Percentage of given feedback:', '%.3f' % ((h_counter / (t + 1e-6)) * 100))
+
+                # Sean: per-episode energy metrics
+                ep_action /= (t + 1e-6)
+                ep_action_abs /= (t + 1e-6)
+                ep_KE_x /= (t + 1e-6)
+                ep_KE_y /= (t + 1e-6)
+
+                # print('Per-episode average of all action values: ', ep_action)
+                print('Per-episode (absolute value) average of all action values: ', ep_action_abs)
+                print('Per-episode average kinetic energy per time step (x): ', ep_KE_x)
+                print('Per-episode average kinetic energy per time step (y): ', ep_KE_y)
+
+                # Sean: cumulative energy metrics
+                sum_action += ep_action
+                sum_action_abs += ep_action_abs
+                sum_KE_x += ep_KE_x
+                sum_KE_y += ep_KE_y
+                # print('Cumulative average of all action values: ', sum_action)
+                print('Cumulative (absolute value) average of all action values: ', (sum_action_abs / (i_episode + 1)))
+                print('Cumulative average kinetic energy per time step (x): ', (sum_KE_x / (i_episode + 1)))
+                print('Cumulative average kinetic energy per time step (y): ', (sum_KE_y / (i_episode + 1)))
+
                 if save_results:
                     total_reward.append(r)
                     total_feedback.append(h_counter)
