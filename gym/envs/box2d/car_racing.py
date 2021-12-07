@@ -43,7 +43,7 @@ STATE_W = 96   # less than Atari 160x192
 STATE_H = 96
 VIDEO_W = 600
 VIDEO_H = 400
-WINDOW_W = 1200
+WINDOW_W = 600
 WINDOW_H = 600
 
 SCALE       = 6.0        # Track scale
@@ -105,7 +105,7 @@ class CarRacing(gym.Env):
     }
 
     def __init__(self):
-        self.seed()
+        self._seed()
         self.contactListener_keepref = FrictionDetector(self)
         self.world = Box2D.b2World((0,0), contactListener=self.contactListener_keepref)
         self.viewer = None
@@ -115,12 +115,11 @@ class CarRacing(gym.Env):
         self.car = None
         self.reward = 0.0
         self.prev_reward = 0.0
-        self.first = True
 
         self.action_space = spaces.Box( np.array([-1,0,0]), np.array([+1,+1,+1]))  # steer, gas, brake
-        self.observation_space = spaces.Box(low=0, high=255, shape=(STATE_H, STATE_W, 3), dtype=np.uint8)
+        self.observation_space = spaces.Box(low=0, high=255, shape=(STATE_H, STATE_W, 3))
 
-    def seed(self, seed=None):
+    def _seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)
         return [seed]
 
@@ -275,7 +274,7 @@ class CarRacing(gym.Env):
         self.track = track
         return True
 
-    def reset(self):
+    def _reset(self):
         self._destroy()
         self.reward = 0.0
         self.prev_reward = 0.0
@@ -290,9 +289,9 @@ class CarRacing(gym.Env):
             print("retry to generate track (normal if there are not many of this messages)")
         self.car = Car(self.world, *self.track[0][1:4])
 
-        return self.step(None)[0]
+        return self._step(None)[0]
 
-    def step(self, action):
+    def _step(self, action):
         if action is not None:
             self.car.steer(-action[0])
             self.car.gas(action[1])
@@ -302,7 +301,7 @@ class CarRacing(gym.Env):
         self.world.Step(1.0/FPS, 6*30, 2*30)
         self.t += 1.0/FPS
 
-        self.state = self.render("state_pixels")
+        self.state = self._render("state_pixels")
 
         step_reward = 0
         done = False
@@ -320,9 +319,15 @@ class CarRacing(gym.Env):
                 done = True
                 step_reward = -100
 
-        return self.state, step_reward, done, {'vel': self.car.hull.linearVelocity}
+        return self.state, step_reward, done, {'vel': self.car.hull.linearVelocity, 'action': action}
 
-    def render(self, mode='human'):
+    def _render(self, mode='human', close=False):
+        if close:
+            if self.viewer is not None:
+                self.viewer.close()
+                self.viewer = None
+            return
+
         if self.viewer is None:
             from gym.envs.classic_control import rendering
             self.viewer = rendering.Viewer(WINDOW_W, WINDOW_H)
@@ -352,8 +357,7 @@ class CarRacing(gym.Env):
 
         arr = None
         win = self.viewer.window
-        if mode != 'state_pixels' or self.first:
-            self.first = False
+        if mode != 'state_pixels':
             win.switch_to()
             win.dispatch_events()
         if mode=="rgb_array" or mode=="state_pixels":
@@ -367,11 +371,11 @@ class CarRacing(gym.Env):
                 VP_H = STATE_H
             gl.glViewport(0, 0, VP_W, VP_H)
             t.enable()
-            self.render_road()
+            self._render_road()
             for geom in self.viewer.onetime_geoms:
                 geom.render()
             t.disable()
-            self.render_indicators(WINDOW_W, WINDOW_H)  # TODO: find why 2x needed, wtf
+            self._render_indicators(WINDOW_W, WINDOW_H)  # TODO: find why 2x needed, wtf
             image_data = pyglet.image.get_buffer_manager().get_color_buffer().get_image_data()
             arr = np.fromstring(image_data.data, dtype=np.uint8, sep='')
             arr = arr.reshape(VP_H, VP_W, 4)
@@ -386,22 +390,17 @@ class CarRacing(gym.Env):
             t = self.transform
             gl.glViewport(0, 0, WINDOW_W, WINDOW_H)
             t.enable()
-            self.render_road()
+            self._render_road()
             for geom in self.viewer.onetime_geoms:
                 geom.render()
             t.disable()
-            self.render_indicators(WINDOW_W, WINDOW_H)
+            self._render_indicators(WINDOW_W, WINDOW_H)
             win.flip()
 
         self.viewer.onetime_geoms = []
         return arr
 
-    def close(self):
-        if self.viewer is not None:
-            self.viewer.close()
-            self.viewer = None
-
-    def render_road(self):
+    def _render_road(self):
         gl.glBegin(gl.GL_QUADS)
         gl.glColor4f(0.4, 0.8, 0.4, 1.0)
         gl.glVertex3f(-PLAYFIELD, +PLAYFIELD, 0)
@@ -422,7 +421,7 @@ class CarRacing(gym.Env):
                 gl.glVertex3f(p[0], p[1], 0)
         gl.glEnd()
 
-    def render_indicators(self, W, H):
+    def _render_indicators(self, W, H):
         gl.glBegin(gl.GL_QUADS)
         s = W/40.0
         h = H/40.0
@@ -478,10 +477,6 @@ if __name__=="__main__":
         env.monitor.start('/tmp/video-test', force=True)
     env.viewer.window.on_key_press = key_press
     env.viewer.window.on_key_release = key_release
-
-    import numpy as np
-    database = []
-    save_n = 0
     while True:
         env.reset()
         total_reward = 0.0
@@ -490,14 +485,12 @@ if __name__=="__main__":
         while True:
             s, r, done, info = env.step(a)
             total_reward += r
-            if save_n % 100 == 0 and save_n != 0 and (steps % 2 == 0 or done):
-                print(str(save_n) + ' images imported...')
-                np.save('racing_car_database', database)
-                print(np.shape(database))
-            if steps % 2 == 0 or done and False:
-                image = np.expand_dims(s, axis=0)
-                database.append(image)
-                save_n += 1
+            if steps % 200 == 0 or done:
+                print("\naction " + str(["{:+0.2f}".format(x) for x in a]))
+                print("step {} total_reward {:+0.2f}".format(steps, total_reward))
+                #import matplotlib.pyplot as plt
+                #plt.imshow(s)
+                #plt.savefig("test.jpeg")
             steps += 1
             if not record_video: # Faster, but you can as well call env.render() every time to play full window.
                 env.render()
